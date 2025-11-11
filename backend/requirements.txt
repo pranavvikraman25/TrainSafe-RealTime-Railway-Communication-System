@@ -1,0 +1,6 @@
+flask
+flask-socketio
+eventlet
+flask-cors
+geopy
+requests
