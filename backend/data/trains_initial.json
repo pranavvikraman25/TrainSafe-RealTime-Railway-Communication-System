@@ -1,0 +1,25 @@
+{
+  "timestamp": 1699620000,
+  "trains": [
+    {
+      "id": "T001",
+      "name": "Train_A",
+      "route": "Chennai-Bangalore",
+      "lat": 13.082700,
+      "lon": 80.270700,
+      "speed_kmh": 85,
+      "signal": 1,
+      "track_id": 2
+    },
+    {
+      "id": "T002",
+      "name": "Train_B",
+      "route": "Kovai-Madurai",
+      "lat": 12.982700,
+      "lon": 80.070700,
+      "speed_kmh": 75,
+      "signal": 1,
+      "track_id": 2
+    }
+  ]
+}
