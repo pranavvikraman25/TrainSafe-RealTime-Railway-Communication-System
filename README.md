@@ -18,14 +18,8 @@ Built using **Flask + Socket.IO** (backend) and **Leaflet + JavaScript** (fronte
 
 ---
 
-+-------------+ +----------------------+ +-------------------+
-| Arduino A | --> | | | |
-| GPS Sensor | | Flask Backend | <----> | Web Frontend |
-| | --> | (Flask-SocketIO API) | WS JSON | (Leaflet + JS) |
-+-------------+ | | | |
-+----------+-----------+ +-------------------+
-|
-v
+
+
 JSON Train Data Stream
 
 
@@ -54,24 +48,6 @@ JSON Train Data Stream
 | **Simulator** | Python Replay Script | Offline GPS replay for testing |
 
 ---
-
-## 🚀 Quick Start (Full Demo)
-
-### 1️⃣ Clone the repository
-```bash
-git clone https://github.com/<your-username>/TrainSafe-RealTime-Railway-Communication-System.git
-cd TrainSafe-RealTime-Railway-Communication-System
-
-
-
-
-
-
-
-## 🏗️ System Architecture
-
-
-
 
 
 
