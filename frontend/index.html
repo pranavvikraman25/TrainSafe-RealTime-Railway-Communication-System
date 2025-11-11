@@ -1,0 +1,392 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>TrainSafe — Live Dashboard</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-sA+e2XkZf0QJ2s5iI1w0w7b3q6s0Y1s2mV9g9g7+4nI=" crossorigin=""/>
+
+  <!-- Simple page styling -->
+  <style>
+    html, body { height: 100%; margin: 0; font-family: Arial, Helvetica, sans-serif; background:#f5f7fa; }
+    header { padding: 14px 18px; background:#083d77; color:white; display:flex; align-items:center; gap:12px; }
+    header h1 { font-size:18px; margin:0; }
+    #app { display: grid; grid-template-columns: 1fr 360px; gap:12px; padding:12px; height: calc(100% - 60px); box-sizing: border-box; }
+    #map { width: 100%; height: 100%; border-radius:8px; box-shadow: 0 6px 16px rgba(10,10,10,0.08); overflow:hidden; }
+    #panel { background: white; border-radius:8px; padding:12px; box-shadow: 0 6px 16px rgba(10,10,10,0.06); display:flex; flex-direction:column; }
+    .section { margin-bottom:12px; }
+    .section h2 { font-size:14px; margin:0 0 8px 0; color:#083d77; }
+    .train-row { padding:8px; border-radius:6px; background:#f7fafc; margin-bottom:8px; display:flex; gap:8px; align-items:center; }
+    .train-name { font-weight:600; color:#102a43; }
+    .metric { font-size:13px; color:#334e68; }
+    #alerts { margin-bottom:10px; }
+    .alert { padding:10px; border-radius:6px; background:#fff3f0; color:#b71c1c; border:1px solid #ffcccb; }
+    .ok { padding:10px; border-radius:6px; background:#f0fff4; color:#0b6623; border:1px solid #bde5c8; }
+    button { background:#083d77; color:white; border:none; padding:8px 12px; border-radius:6px; cursor:pointer; }
+    button.secondary { background:#2a7de1; }
+    footer { padding:8px 14px; font-size:12px; color:#485d71; }
+    .small { font-size:12px; color:#7b8ca3; }
+    .stat { display:flex; justify-content:space-between; align-items:center; padding:6px 0; }
+  </style>
+</head>
+<body>
+  <header>
+    <img src="" alt="" style="width:36px;height:36px;border-radius:6px;background:white;display:inline-block"/>
+    <h1>TrainSafe — Live Dashboard (Leaflet + Socket.IO)</h1>
+  </header>
+
+  <div id="app">
+    <div id="map"></div>
+
+    <div id="panel">
+      <div id="controls" class="section">
+        <h2>Controls</h2>
+        <div style="display:flex; gap:8px;">
+          <button id="btn-center">Center Map</button>
+          <button id="btn-toggle-tracks" class="secondary">Toggle Tracks</button>
+        </div>
+        <div style="margin-top:10px;">
+          <label class="small">Backend host</label>
+          <input id="input-host" style="width:100%; padding:6px; margin-top:6px; border-radius:6px; border:1px solid #e2e8f0" value="http://localhost:5000" />
+        </div>
+      </div>
+
+      <div id="alerts" class="section"></div>
+
+      <div id="train-list" class="section">
+        <h2>Active Trains</h2>
+        <div id="trains-container"></div>
+      </div>
+
+      <div id="summary" class="section">
+        <h2>Summary</h2>
+        <div class="stat"><div class="small">Last update</div><div id="last-update" class="small">—</div></div>
+        <div class="stat"><div class="small">Tracked trains</div><div id="total-trains" class="small">0</div></div>
+        <div style="margin-top:8px;"><button id="btn-reload">Refresh Now</button></div>
+      </div>
+
+      <footer class="small">
+        Demo: Train movement animation from JSON. Use replay script to feed GPS into backend.
+      </footer>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-o9N1j8k+gQXR8+gS6vQvV/Gq6w5o1zGh6t7fW2Yjv2Q=" crossorigin=""></script>
+
+  <!-- Socket.IO client (v4) -->
+  <script src="https://cdn.socket.io/4.6.1/socket.io.min.js"
+          integrity="sha384-+bHqfZ9uR0q7n2pQ+gK5z1kJXH3r+3mY8Q4cKx0p4s4z4wZq0bK6mK5kYbV0D6qV" crossorigin="anonymous"></script>
+
+  <script>
+  /*************************************************************************
+   * TrainSafe frontend
+   *
+   * - Connects to backend socket.io (train_update events)
+   * - Creates a single Leaflet map instance
+   * - Adds route GeoJSON when provided (optional)
+   * - Maintains marker objects and moves them smoothly (interpolation)
+   * - Shows a single alert banner on conflict (same track + close)
+   *
+   * Instructions:
+   *  - Put this file in frontend/index.html
+   *  - Run backend from previous step (default: http://localhost:5000)
+   *  - Serve this folder (e.g., `python -m http.server 8000` inside frontend/) and open http://localhost:8000
+   *************************************************************************/
+
+  // ---- Config ----
+  let DEFAULT_BACKEND = document.getElementById('input-host').value || "http://localhost:5000";
+  let SOCKET_PATH = "/socket.io";         // default socket.io path
+  const ALERT_DISTANCE_KM = 10.0;         // threshold for same-track alert
+  const ANIMATION_DURATION_MS = 900;      // duration to interpolate between updates
+  const LATLON_ZERO = [0,0];
+
+  // ---- Map init ----
+  const map = L.map('map', { preferCanvas: true }).setView([13.05, 80.2], 8);
+  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+    maxZoom: 18,
+    attribution: '&copy; OpenStreetMap contributors'
+  }).addTo(map);
+
+  // optional layers: tracks (GeoJSON) - will be toggled by button
+  let trackLayer = L.layerGroup().addTo(map);
+  let showTracks = true;
+
+  // ---- Storage for trains ----
+  // markers: { id: L.Marker }
+  // lastPos: { id: [lat, lon] }
+  // animHandles: { id: { startTime, from, to, duration } }  // for requestAnimationFrame
+  const markers = {};
+  const lastPos = {};
+  const animHandles = {};
+
+  // utility to format time
+  function fmtTime(ts) {
+    if (!ts) return "—";
+    try {
+      const d = new Date(ts * 1000);
+      return d.toLocaleString();
+    } catch (e) { return "—"; }
+  }
+
+  // ---- Nearest point on polyline (for snap-to-track) ----
+  // If you provide route GeoJSON, this function finds nearest point on polyline.
+  function closestPointOnPolyline(latlng, latlngs) {
+    // latlng = [lat, lon], latlngs = array of [lat, lon] points sequentially
+    let best = { idx: -1, dist: Infinity, point: null };
+    for (let i = 0; i < latlngs.length - 1; i++) {
+      const a = latlngs[i], b = latlngs[i+1];
+      // project point p onto segment ab in lat/lon space (approx)
+      const x1 = a[1], y1 = a[0];
+      const x2 = b[1], y2 = b[0];
+      const x0 = latlng[1], y0 = latlng[0];
+      const dx = x2 - x1, dy = y2 - y1;
+      const denom = dx*dx + dy*dy;
+      let t = 0;
+      if (denom > 0) t = ((x0 - x1)*dx + (y0 - y1)*dy) / denom;
+      if (t < 0) t = 0; if (t > 1) t = 1;
+      const projx = x1 + t*dx, projy = y1 + t*dy;
+      // compute approximate distance squared (lon/lat scales vary but fine for ranking)
+      const d2 = (projx - x0)*(projx - x0) + (projy - y0)*(projy - y0);
+      if (d2 < best.dist) {
+        best.idx = i;
+        best.dist = d2;
+        best.point = [projy, projx];
+      }
+    }
+    return best.point || latlng;
+  }
+
+  // ---- Smooth animate marker from A->B over duration (ms) using requestAnimationFrame ----
+  function animateMarker(id, from, to, duration=ANIMATION_DURATION_MS) {
+    // cancel existing handle
+    if (animHandles[id] && animHandles[id].raf) cancelAnimationFrame(animHandles[id].raf);
+    const start = performance.now();
+    animHandles[id] = { start, from, to, duration, raf: null };
+
+    function step(now) {
+      const handle = animHandles[id];
+      if (!handle) return;
+      const t = Math.min(1, (now - handle.start)/handle.duration);
+      // ease in/out (smooth)
+      const tt = t<0.5 ? 2*t*t : -1 + (4 - 2*t)*t;
+      const lat = handle.from[0] + (handle.to[0] - handle.from[0]) * tt;
+      const lon = handle.from[1] + (handle.to[1] - handle.from[1]) * tt;
+      markers[id].setLatLng([lat, lon]);
+      if (t < 1) {
+        handle.raf = requestAnimationFrame(step);
+      } else {
+        // done
+        animHandles[id] = null;
+      }
+    }
+    animHandles[id].raf = requestAnimationFrame(step);
+  }
+
+  // ---- Create or update train marker ----
+  function createOrUpdateTrain(t, snapPolyline=null) {
+    const id = t.id;
+    const newLatLng = [t.lat, t.lon];
+    // Optionally snap to given polyline coordinates
+    let displayLatLng = newLatLng;
+    if (snapPolyline && snapPolyline.length > 1) {
+      displayLatLng = closestPointOnPolyline(newLatLng, snapPolyline);
+    }
+
+    if (!markers[id]) {
+      const marker = L.marker(displayLatLng, { title: t.name, riseOnHover: true });
+      marker.addTo(map);
+      marker.bindPopup(`<b>${t.name}</b><br>${t.route}<br>Speed: ${t.speed_kmh} km/h<br>Track:${t.track_id}`);
+      markers[id] = marker;
+      lastPos[id] = displayLatLng;
+    } else {
+      // animate smoothly from last pos to new pos
+      const from = lastPos[id] || markers[id].getLatLng();
+      const to = displayLatLng;
+      animateMarker(id, [from.lat || from[0], from.lng || from[1]], to);
+      lastPos[id] = to;
+      // update popup content
+      markers[id].getPopup().setContent(`<b>${t.name}</b><br>${t.route}<br>Speed: ${t.speed_kmh} km/h<br>Track:${t.track_id}`);
+    }
+  }
+
+  // ---- Update side panel UI ----
+  function updatePanel(state) {
+    const container = document.getElementById('trains-container');
+    container.innerHTML = ''; // replace content (single-view)
+    const trains = state.trains || [];
+    document.getElementById('last-update').innerText = fmtTime(state.timestamp || Math.floor(Date.now()/1000));
+    document.getElementById('total-trains').innerText = trains.length;
+
+    // compute pairwise alerts (simple example: first two trains)
+    let alertShown = false;
+    const alertsEl = document.getElementById('alerts');
+    alertsEl.innerHTML = '';
+
+    // pairwise check: same track and close
+    for (let i=0;i<trains.length;i++) {
+      const t = trains[i];
+      // display train row
+      const row = document.createElement('div');
+      row.className = 'train-row';
+      row.innerHTML = `<div style="flex:1">
+                         <div class="train-name">${t.name}</div>
+                         <div class="metric">${t.route}</div>
+                       </div>
+                       <div style="text-align:right">
+                         <div class="metric">Speed: ${t.speed_kmh} km/h</div>
+                         <div class="metric">Track: ${t.track_id}</div>
+                       </div>`;
+      container.appendChild(row);
+    }
+
+    // compute alerts (all pairs)
+    for (let i=0;i<trains.length;i++){
+      for (let j=i+1;j<trains.length;j++){
+        const a = trains[i], b = trains[j];
+        if (!a || !b) continue;
+        if (a.track_id === b.track_id) {
+          const d = map.distance([a.lat,a.lon],[b.lat,b.lon]) / 1000.0; // meters -> km
+          if (d < ALERT_DISTANCE_KM) {
+            // show single alert banner
+            const div = document.createElement('div');
+            div.className = 'alert';
+            div.innerText = `🚨 ALERT: ${a.name} and ${b.name} are ${d.toFixed(2)} km apart on same track (${a.track_id}). Hold one train.`;
+            alertsEl.appendChild(div);
+            alertShown = true;
+            // only one alert needed; show summary for this pair
+            break;
+          }
+        }
+      }
+      if (alertShown) break;
+    }
+    if (!alertShown) {
+      const ok = document.createElement('div');
+      ok.className = 'ok';
+      ok.innerText = '✅ No conflicts detected.';
+      alertsEl.appendChild(ok);
+    }
+  }
+
+  // ---- Socket.IO connection and initial fetch ----
+  let socket = null;
+  let backendHost = DEFAULT_BACKEND;
+
+  function connectSocket() {
+    if (socket) socket.close();
+    backendHost = (document.getElementById('input-host').value || DEFAULT_BACKEND).trim();
+    try {
+      socket = io(backendHost, { path: SOCKET_PATH, transports: ['websocket', 'polling'] });
+    } catch (e) {
+      console.warn("SocketIO init failed", e);
+      socket = null;
+    }
+    if (!socket) return;
+
+    socket.on('connect', () => {
+      console.log('socket connected', socket.id);
+    });
+
+    socket.on('train_update', (state) => {
+      try {
+        // state: {timestamp, trains: [ ... ]}
+        // create/update markers
+        // If you have a track polyline available (see loadRoute()), pass it as second arg to snap to track
+        const snapPolyline = window.currentRouteCoords || null;
+        (state.trains || []).forEach(t => createOrUpdateTrain(t, snapPolyline));
+        updatePanel(state);
+      } catch (e) {
+        console.error("Error handling train_update", e);
+      }
+    });
+
+    socket.on('disconnect', () => {
+      console.log('socket disconnected');
+    });
+  }
+
+  // initial connect
+  connectSocket();
+
+  // Also perform an initial HTTP GET to /status in case socket missed something
+  async function fetchInitialState() {
+    const base = (document.getElementById('input-host').value || DEFAULT_BACKEND).trim();
+    try {
+      const resp = await fetch(base + '/status');
+      if (!resp.ok) throw new Error('status fetch failed');
+      const s = await resp.json();
+      (s.trains || []).forEach(t => createOrUpdateTrain(t));
+      updatePanel(s);
+      // center map to current trains
+      centerMapToTrains(s.trains || []);
+    } catch (e) {
+      console.warn("Initial status fetch failed:", e);
+    }
+  }
+  fetchInitialState();
+
+  // ---- Optional: load route GeoJSON (precomputed) ----
+  // If you have a route GeoJSON file (e.g. frontend/static/chennai_bengaluru.geojson),
+  // uncomment and adjust the fetch path below. It will draw the route and set window.currentRouteCoords.
+  //
+  // fetch('chennai_bengaluru.geojson')
+  //   .then(r => r.json())
+  //   .then(g => {
+  //     const routeLayer = L.geoJSON(g, { style: { color: '#555555', weight: 4, opacity: 0.7 } }).addTo(trackLayer);
+  //     // build a flat array of coordinates [ [lat, lon], ... ] for snapping
+  //     const coords = [];
+  //     g.features.forEach(f => {
+  //       const geom = f.geometry;
+  //       if (geom.type === 'LineString') {
+  //         geom.coordinates.forEach(pt => coords.push([pt[1], pt[0]]));
+  //       } else if (geom.type === 'MultiLineString') {
+  //         geom.coordinates.forEach(line => line.forEach(pt => coords.push([pt[1], pt[0]])));
+  //       }
+  //     });
+  //     window.currentRouteCoords = coords;
+  //   }).catch(e => console.warn("No route geojson loaded:", e));
+
+  // ---- Helpers: center map to all trains ----
+  function centerMapToTrains(trains) {
+    if (!trains || trains.length === 0) return;
+    const latlngs = trains.map(t => [t.lat, t.lon]);
+    try {
+      const bounds = L.latLngBounds(latlngs);
+      map.fitBounds(bounds.pad(0.25));
+    } catch (e) { console.warn(e); }
+  }
+
+  // ---- Buttons ----
+  document.getElementById('btn-center').addEventListener('click', () => {
+    // fetch current status then center
+    fetch((document.getElementById('input-host').value || DEFAULT_BACKEND).trim() + '/status').then(r=>r.json()).then(s => centerMapToTrains(s.trains || []));
+  });
+
+  document.getElementById('btn-toggle-tracks').addEventListener('click', () => {
+    showTracks = !showTracks;
+    if (showTracks) map.addLayer(trackLayer); else map.removeLayer(trackLayer);
+  });
+
+  // input host change reconnect
+  document.getElementById('input-host').addEventListener('change', () => {
+    // close previous socket and reconnect
+    if (socket) socket.close();
+    connectSocket();
+    // fetch fresh data too
+    fetchInitialState();
+  });
+
+  document.getElementById('btn-reload').addEventListener('click', () => fetchInitialState());
+
+  // ---- clean up on page unload ----
+  window.addEventListener('beforeunload', () => {
+    if (socket) socket.close();
+  });
+
+  </script>
+</body>
+</html>
