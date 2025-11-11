@@ -51,3 +51,125 @@ JSON Train Data Stream
 
 
 
+
+## 🚀 Quick Start (Full Demo)
+
+### 1️⃣ Clone the repository
+```bash
+git clone https://github.com/<your-username>/TrainSafe-RealTime-Railway-Communication-System.git
+cd TrainSafe-RealTime-Railway-Communication-System
+2️⃣ Setup and run backend
+bash
+Copy code
+cd backend
+pip install -r requirements.txt
+python app.py
+Backend starts at http://localhost:5000
+
+3️⃣ Run frontend dashboard
+bash
+Copy code
+cd ../frontend
+python -m http.server 8000
+Open http://localhost:8000 in your browser.
+
+4️⃣ Start the GPS simulator
+bash
+Copy code
+cd ../replay
+python replay.py --host http://localhost:5000 --file sample_trace.json --interval 1.0
+You’ll now see Train A and Train B move live on the map.
+If both trains enter the same track within 10 km, an alert banner appears instantly.
+
+🧠 Project Modules
+Module	Description
+Backend	Receives GPS coordinates, computes distance, detects collisions, and broadcasts via WebSocket.
+Frontend	Leaflet dashboard showing train positions, speed, and alerts.
+Replay Simulator	Sends prerecorded GPS traces to backend for demo.
+Hardware (Planned)	Arduino + GPS sending live coordinates to /update endpoint.
+
+📊 Example Output
+View	Description
+🌍 Map View	Trains moving along Chennai-Bangalore route.
+⚠️ Alert Panel	“🚨 Train A and Train B within 9.8 km on Track 2 — Hold Train B.”
+📈 Operator Metrics	Speed, distance, ETA, signal status updating live.
+
+🧰 Repository Structure
+pgsql
+Copy code
+TrainSafe-RealTime-Railway-Communication-System/
+│
+├── backend/
+│   ├── app.py
+│   ├── data/
+│   │   └── trains_initial.json
+│   └── requirements.txt
+│
+├── frontend/
+│   ├── index.html
+│   └── chennai_bengaluru.geojson   # optional route map
+│
+├── replay/
+│   ├── replay.py
+│   └── sample_trace.json
+│
+├── LICENSE
+├── README.md
+└── .gitignore
+🌐 Deployment Options
+Railway.app / Render / Heroku → Host Flask backend
+
+GitHub Pages / Vercel / Netlify → Host frontend dashboard
+
+Or deploy both together using Docker Compose
+
+bash
+Copy code
+docker compose up
+🧪 Testing
+Run the simulator:
+
+bash
+Copy code
+python replay/replay.py --interval 1
+Observe real-time updates on the dashboard and verify that alerts trigger correctly.
+
+🗺️ Future Roadmap
+ Real-time GPS streaming
+
+ Collision detection (same track & distance)
+
+ Map-matching with real OSM railway data
+
+ Dynamic ETA calculation
+
+ Firebase / MQTT cloud integration
+
+ Rotating train icons based on direction
+
+ Dockerized one-click deployment
+
+🛡️ License
+Licensed under the MIT License — free for academic & personal use.
+See LICENSE for details.
+
+👨‍💻 Contributors
+Name	Role	Contribution
+PV	Lead Engineer & Creator	Concept · Architecture · Full Stack Dev
+ChatGPT (Co-Dev)	Technical Assistant	Backend · Frontend · Documentation
+
+❤️ Inspiration
+“A one-minute signalling delay can cost countless lives.
+TrainSafe eliminates that delay — bringing trains closer to intelligence.”
+
+🏁 Project Links
+📂 Repository: TrainSafe-RealTime-Railway-Communication-System
+
+🎥 Demo Video: December 1st week
+📄 Documentation: (Will Upload Later)/docs 
+
+🔧 Contact
+Maintainer: PV
+📧 Email: pranav.vikraman.25@gmail.com
+💼 LinkedIn: https://www.linkedin.com/in/pranav-vikraman-322020242
+🌐 Portfolio: Pranavvikraman.me
